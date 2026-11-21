@@ -1,0 +1,31 @@
+# Builds the site on every push and pull request, so a broken build never reaches the host.
+name: build
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_ARCGIS_KEY: ${{ secrets.VITE_ARCGIS_KEY }}
+      - name: Check the security headers and content made it into the build
+        run: |
+          grep -q "Content-Security-Policy" dist/index.html
+          grep -q "Content-Security-Policy" dist/_headers
+          grep -q "Sigiriya" dist/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: dist
+          retention-days: 7
