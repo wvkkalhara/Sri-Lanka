@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sri Lanka 3D: the island field guide</title>
+  <meta name="description" content="Every beautiful place in Sri Lanka on real 3D terrain: 101 places with seasons, prices, hidden details and a route planner. Fast, private, works without 3D.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://ibasemaps-api.arcgis.com https://server.arcgisonline.com https://elevation-tiles-prod.s3.amazonaws.com https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types sw">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#07140f">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta property="og:title" content="Sri Lanka, flown over">
+  <meta property="og:description" content="Every beautiful place on the island, in real 3D terrain, with the season, the route and the price for each.">
+  <meta property="og:image" content="/img/sigiriya-1280.jpg">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" as="image" href="/img/sigiriya-1280.avif" type="image/avif" imagesrcset="/img/sigiriya-640.avif 640w, /img/sigiriya-1280.avif 1280w, /img/sigiriya-1920.avif 1920w" imagesizes="(max-width: 760px) 100vw, 26vw">
+  <script type="module" src="/src/main.js"></script>
+  <noscript><link rel="stylesheet" href="/noscript.css"></noscript>
+</head>
+<body>
+  <a class="skip" href="#places">Skip to the places</a>
+  <div class="app" id="app">
+    <div class="globe"><div class="labels"></div><p class="map-credit" hidden></p></div>
+    <header class="top">
+      <a class="brand" href="#/explore" aria-label="Sri Lanka 3D, home"><span class="brand-mark">Sri Lanka</span><span class="brand-sub">3D field guide</span></a>
+      <nav class="tabs" aria-label="App sections">
+        <a href="#/explore" data-tab="explore">Explore</a><a href="#/trip" data-tab="trip">Trip</a><a href="#/tour" data-tab="tour">Tour</a><a href="#/info" data-tab="info">Info</a>
+      </nav>
+      <button type="button" class="search-btn" data-cmd="search"><span>Search places</span><kbd>/</kbd></button>
+      <button type="button" class="icon-btn text" data-cmd="info-view" title="Plain page, no 3D">Info view</button>
+    </header>
+    <aside class="panel" data-sheet="peek" aria-label="Details"><button type="button" class="grip" aria-label="Resize panel"></button><div class="panel-body"></div></aside>
+    <div class="hud">
+      <div class="months-wrap">
+        <div class="months" role="group" aria-label="Travel month">
+          <button type="button" data-month="1">Jan</button><button type="button" data-month="2">Feb</button><button type="button" data-month="3">Mar</button><button type="button" data-month="4">Apr</button><button type="button" data-month="5">May</button><button type="button" data-month="6">Jun</button><button type="button" data-month="7">Jul</button><button type="button" data-month="8">Aug</button><button type="button" data-month="9">Sep</button><button type="button" data-month="10">Oct</button><button type="button" data-month="11">Nov</button><button type="button" data-month="12">Dec</button>
+        </div>
+        <p class="season-line" aria-live="polite"></p>
+      </div>
+      <div class="tools">
+        <p class="readout" aria-hidden="true"></p>
+        <div class="daytime" title="Time of day: [ and ] keys"><span class="sun-dot" aria-hidden="true"></span><input type="range" min="5.5" max="19" step="0.25" value="15.5" aria-label="Time of day, Sri Lanka time"><output>3:30 pm</output><button type="button" class="live" data-cmd="live" aria-pressed="false" title="Follow the clock in Sri Lanka right now (L)">Live</button></div>
+        <button type="button" class="icon-btn text" data-cmd="style">Relief map</button>
+        <span class="tool-group"><button type="button" class="icon-btn" data-cmd="zoom-in" aria-label="Zoom in">+</button><button type="button" class="icon-btn" data-cmd="zoom-out" aria-label="Zoom out">−</button></span>
+        <button type="button" class="icon-btn text" data-cmd="home">Reset</button>
+      </div>
+    </div>
+    <div class="tour-cap" hidden></div>
+    <div class="loader" role="status" aria-label="Loading the island">
+      <p class="loader-word">Sri Lanka</p>
+      <p class="loader-n">0</p>
+      <div class="loader-track"><div class="loader-bar"></div></div>
+      <p class="loader-note">Real terrain and satellite imagery, loading once and then kept offline.</p>
+      <button type="button" class="link" data-cmd="skip-intro">Skip the intro</button>
+    </div>
+    <dialog class="palette" aria-label="Search">
+      <input type="search" placeholder="Search places, regions and actions" aria-label="Search" maxlength="40" autocomplete="off">
+      <ul role="listbox"></ul>
+      <p class="muted small">Enter to open · arrows to move · Esc to close</p>
+    </dialog>
+    <div class="cursor" hidden></div>
+  </div>
+  <div class="guide">
+  <header class="bar">
+    <a href="#journey" class="keep-d">Journey</a>
+    <a href="#places">Places</a>
+    <a href="#plan" class="keep">Plan</a>
+    <a href="#practical">Practical</a>
+    <button type="button" class="lite-toggle" data-open-app>Open the 3D app</button>
+  </header>
+  <main>
+    <!--BODY-->
+  </main>
+  <dialog class="sheet" aria-labelledby="sheet-title"></dialog>
+  </div>
+</body>
+</html>
