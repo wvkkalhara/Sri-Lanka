@@ -53,7 +53,7 @@ Content-Security-Policy still applies through the meta tag. For a custom domain,
 | `src/data/places.js` | Every place: coordinates, seasons, fees, insider detail, access, tips. Edit content here. |
 | `src/data/content.js` | The practical answers (visa, cyclone status, emergency numbers). |
 | `src/render.js` | Build-time renderer: writes all content into `index.html` as static HTML. |
-| `src/app/world.js` | 3D engine: satellite terrain, water sheen, sky, monsoon clouds, the real sun for any month and hour (time-of-day slider, `[` `]` keys, `L` or the Live button to follow the clock in Sri Lanka), sub-metre Esri aerial imagery streamed for close-ups (needs `VITE_ARCGIS_KEY`, see `.env.example`; Sentinel-2 is always the fallback), a dense close-up terrain patch (~23 m mesh from SRTM 30 m, streamed from AWS Terrain Tiles; falls back to the local 38 m heights), relief that eases from 3.5× height on the island view to ~1.7× up close, pins, routes, map controls, camera flights. |
+| `src/app/world.js` | 3D engine: satellite terrain, water sheen, sky, monsoon clouds, the real sun for any month and hour (time-of-day slider, `[` `]` keys, `L` or the Live button to follow the clock in Sri Lanka), sub-metre Esri aerial imagery streamed for close-ups (needs `VITE_ARCGIS_KEY`, see `.env.example`; Sentinel-2 is always the fallback), a dense close-up terrain patch (~23 m mesh from SRTM 30 m, streamed from AWS Terrain Tiles; falls back to the local 38 m heights), relief that eases from 3.5× height on the island view to ~1.7× up close, pins, street-level "Walk here" photos from Mapillary (lazy-loaded viewer; needs `VITE_MAPILLARY_TOKEN`; its one `new Function` is replaced at build time so the strict CSP stays intact), routes, map controls, camera flights. |
 | `src/app/app.js` | The app: live weather with the Live button, printable itinerary (Print / PDF), "Photo spot" flights to where each photo was taken, router (`#/explore`, `#/place/<id>`, `#/trip`, `#/tour`, `#/info`), panels, search, tour, HUD, bottom sheet. |
 | `src/app/app.css` | Green design system for the app. |
 | `public/sw.js`, `public/manifest.webmanifest` | Offline + install. |
@@ -74,7 +74,7 @@ Content-Security-Policy still applies through the meta tag. For a custom domain,
 ## Security
 
 - Everything the site needs is self-hosted (fonts, scripts, images, terrain). Three optional streams: Esri aerial imagery and AWS Terrain
-  Tiles (SRTM heights) when you zoom in close, and Open-Meteo weather while Live is on. All are cookie-less CORS fetches allowed by
+  Tiles (SRTM heights) when you zoom in close, and Open-Meteo weather while Live is on, plus Mapillary street photos when a visitor taps Walk here. All are cookie-less CORS fetches allowed by
   name in the CSP, are skipped on Save-Data/2G, time out, switch themselves off after repeated failures, and fall back
   to the self-hosted data.
 - Strict Content-Security-Policy (meta tag + `public/_headers` for Netlify / Cloudflare Pages):

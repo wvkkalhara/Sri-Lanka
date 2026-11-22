@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sri Lanka 3D: the island field guide</title>
   <meta name="description" content="Every beautiful place in Sri Lanka on real 3D terrain: 101 places with seasons, prices, hidden details and a route planner. Fast, private, works without 3D.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://ibasemaps-api.arcgis.com https://server.arcgisonline.com https://elevation-tiles-prod.s3.amazonaws.com https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types sw">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://*.fbcdn.net https://*.mapillary.com; font-src 'self'; connect-src 'self' https://ibasemaps-api.arcgis.com https://server.arcgisonline.com https://elevation-tiles-prod.s3.amazonaws.com https://api.open-meteo.com https://graph.mapillary.com https://*.mapillary.com https://*.fbcdn.net; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types sw">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#000000">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -14,10 +14,10 @@
   <meta property="og:description" content="Every beautiful place on the island, in real 3D terrain, with the season, the route and the price for each.">
   <meta property="og:image" content="/img/sigiriya-1280.jpg">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preload" as="image" href="/img/sigiriya-1280.avif" type="image/avif" imagesrcset="/img/sigiriya-640.avif 640w, /img/sigiriya-1280.avif 1280w, /img/sigiriya-1920.avif 1920w" imagesizes="(max-width: 760px) 100vw, 26vw">
+  <link rel="preload" as="image" href="/img/sigiriya-1280.avif" type="image/avif" imagesrcset="/img/sigiriya-640.avif 640w, /img/sigiriya-1280.avif 1280w, /img/sigiriya-1920.avif 1920w" imagesizes="(max-width: 760px) 100vw, 26vw">
   <noscript><link rel="stylesheet" href="/noscript.css"></noscript>
-  <script type="module" crossorigin src="/assets/index-zINfRlkS.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-B-0MrGp5.css">
+  <script type="module" crossorigin src="/assets/index-2P-fUcGz.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BhfGIYDm.css">
 </head>
 <body>
   <a class="skip" href="#places">Skip to the places</a>
@@ -42,12 +42,31 @@
       <div class="tools">
         <p class="readout" aria-hidden="true"></p>
         <div class="daytime" title="Time of day: [ and ] keys"><span class="sun-dot" aria-hidden="true"></span><input type="range" min="5.5" max="19" step="0.25" value="15.5" aria-label="Time of day, Sri Lanka time"><output>3:30 pm</output><button type="button" class="live" data-cmd="live" aria-pressed="false" title="Follow the clock in Sri Lanka right now (L)">Live</button></div>
+        <button type="button" class="icon-btn text fly-btn" data-cmd="fly" title="Fly with the keyboard and discover places (F)">Fly</button>
         <button type="button" class="icon-btn text" data-cmd="style">Relief map</button>
         <span class="tool-group"><button type="button" class="icon-btn" data-cmd="zoom-in" aria-label="Zoom in">+</button><button type="button" class="icon-btn" data-cmd="zoom-out" aria-label="Zoom out">−</button></span>
         <button type="button" class="icon-btn text" data-cmd="home">Reset</button>
       </div>
     </div>
     <div class="tour-cap" hidden></div>
+    <p class="intro-title" hidden aria-hidden="true">Sri Lanka<span>101 places on the real island</span></p>
+    <p class="fps" hidden aria-live="off"></p>
+    <dialog class="walk" aria-label="Street-level photos">
+      <div class="walk-bar"><p class="walk-title">Street photos</p><p class="walk-credit">Photos © Mapillary contributors, CC BY-SA 4.0 · arrows or click to walk</p><button type="button" class="btn walk-close">Back to the island</button></div>
+      <div class="walk-view"></div>
+    </dialog>
+    <section class="fly-hud" hidden aria-label="Fly mode">
+      <div class="fly-score"><p class="fly-n"><strong>0</strong><span> of 101</span></p><p class="fly-label">places discovered</p></div>
+      <p class="fly-next"><span class="fly-arrow" aria-hidden="true"></span><span class="fly-next-text">Fly low over a place to discover it</span></p>
+      <p class="fly-keys">W A S D to fly · drag to look · E up · Q down · Shift fast · Esc to land</p>
+      <div class="fly-pad" aria-label="Flight controls">
+        <button type="button" data-hold="u" aria-label="Climb">Up</button>
+        <button type="button" data-hold="f" aria-label="Fly forward">Forward</button>
+        <button type="button" data-hold="b" aria-label="Fly back">Back</button>
+        <button type="button" data-hold="d" aria-label="Descend">Down</button>
+      </div>
+      <button type="button" class="btn fly-exit" data-cmd="fly">Land</button>
+    </section>
     <div class="loader" role="status" aria-label="Loading the island">
       <p class="loader-word">Sri Lanka</p>
       <p class="loader-n">0</p>

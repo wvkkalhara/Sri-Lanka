@@ -1,5 +1,5 @@
 // Offline support. Same-origin GET only; nothing about the visitor is stored here.
-const VERSION = 'island-v12';
+const VERSION = 'island-v13';
 // the folder the site lives in ("/" or "/Sri-Lanka/" on GitHub Pages): everything is relative to this file
 const BASE = new URL('./', self.location).pathname;
 const SHELL = ['', 'manifest.webmanifest', 'favicon.svg', 'terrain/height.png', 'terrain/relief.webp', 'terrain/satellite.webp', 'terrain/satellite-sm.webp', 'noscript.css'].map((p) => BASE + p);

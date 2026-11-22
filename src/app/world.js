@@ -2,6 +2,8 @@
 // sky, monsoon clouds, pins, 3D routes, free map controls and scripted camera flights.
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
+import { EffectComposer, RenderPass, EffectPass, SMAAEffect, BloomEffect, ToneMappingEffect, ToneMappingMode } from 'postprocessing';
+import { N8AOPostPass } from 'n8ao';
 import { TERRAIN, ASPECT, project as projectFn } from '../geo.js';
 
 export const W = 10, H = W * ASPECT;
@@ -47,7 +49,7 @@ function bakeLight(x, z, y0, hy) {
 // Light and sky for a sun altitude (radians): white noon, golden low sun, rose-and-indigo blue hour.
 const SKY = {
   // sun: linear RGB + strength; the rest are sRGB hex
-  day: { sun: [1, 0.87, 0.69, 1.1], zen: 0x3d79a8, hor: 0xd3dfd8, gnd: 0x6f8c84, glow: 0, exp: 1.5 },
+  day: { sun: [1, 0.87, 0.69, 1.1], zen: 0x3a78b8, hor: 0xcddcec, gnd: 0x6f8c84, glow: 0, exp: 1.5 },
   gold: { sun: [1, 0.5, 0.2, 2.1], zen: 0x3a6c9c, hor: 0xecd0ae, gnd: 0x56685f, glow: 0.6, exp: 1.7 },
   dusk: { sun: [0.85, 0.26, 0.12, 0.35], zen: 0x2a4378, hor: 0x8088a6, gnd: 0x3a4a56, glow: 0.9, exp: 2.6 },
 };
@@ -164,7 +166,7 @@ const landFrag = /* glsl */`
       vec2 hp = ((vW.xz - uMapMin) / uMapSize - uHiRect.xy) / uHiRect.zw;
       if (hp.x > 0. && hp.x < 1. && hp.y > 0. && hp.y < 1.) {
         vec4 hi = texture2D(uHi, hp); vec2 e = min(hp, 1. - hp);
-        float soft = texture2D(uHi, hp, 4.5).a;              // a blurred mip of the alpha feathers the edge of any tile still missing
+        float soft = min(texture2D(uHi, hp, 4.5).a, texture2D(uHi, hp, 6.5).a * 1.15); // blurred mips of the alpha feather the edge of any missing tile (open sea has none)
         hm = hi.a * smoothstep(.5, .97, soft) * uHiK * smoothstep(0., .07, min(e.x, e.y)); sat = mix(sat, hi.rgb, hm);
       }
     }
@@ -203,12 +205,22 @@ const seaFrag = /* glsl */`
     float h1 = noise(p + vec2(t, t * .7)), h2 = noise(p * 2.3 - vec2(t * .8, t * 1.3)), h3 = noise(p * 6.1 + vec2(t * 1.7, -t));
     // ripples flatten with distance (as a real sea does once the waves are smaller than a pixel): no shimmer or blocks
     vec3 vv = normalize(cameraPosition - vW); float dist0 = length(vW - cameraPosition), amp = smoothstep(.04, .35, vv.y) / (1. + dist0 * dist0 * 5.);
-    vec3 n = normalize(vec3(((h1 - .5) * .35 + (h2 - .5) * .2 + (h3 - .5) * .1) * amp, 1., ((h2 - .5) * .35 + (h3 - .5) * .12) * amp));
+    // long swells rolling in from the south-west (the monsoon's direction) under the wind ripples
+    // (about 150 m from crest to crest, broken up so they never read as stripes, and gone with distance)
+    float sw1 = sin(dot(vW.xz, vec2(.8, -.6)) * 1150. - uTime * 2.4), sw2 = sin(dot(vW.xz, vec2(.55, -.83)) * 1630. - uTime * 3.1);
+    float swAmp = smoothstep(.02, .3, vv.y) * noise(vW.xz * 60. + uTime * .05) / (1. + dist0 * dist0 * 400.);
+    vec3 n = normalize(vec3(((h1 - .5) * .35 + (h2 - .5) * .2 + (h3 - .5) * .1) * amp + (sw1 * .8 + sw2 * .4) * .09 * swAmp, 1., ((h2 - .5) * .35 + (h3 - .5) * .12) * amp - (sw1 * .6 + sw2 * .5) * .09 * swAmp));
     vec3 v = normalize(cameraPosition - vW); vec3 r = reflect(-v, n); r.y = abs(r.y);
     float fres = .02 + .98 * pow(1. - max(dot(n, v), 0.), 5.);
-    float glint = (pow(max(dot(r, uSun), 0.), 700.) * 3. + pow(max(dot(r, uSun), 0.), 60.) * .25) * (1. - uStyle);
+    float sun = max(dot(r, uSun), 0.);
+    float sparkle = step(.93, noise(vW.xz * 900. + uTime * vec2(2.1, -1.3))) * pow(sun, 24.) * 2.5 * smoothstep(.6, .05, dist0); // glitter on the sun path
+    float glint = (pow(sun, 700.) * 3. + pow(sun, 60.) * .25 + sparkle) * (1. - uStyle);
     float shade = 1. - .5 * cloudAt(vW.xz + sunShift(uCloudY));
     vec3 refl = skyCol(r) * .82;
+    if (r.y > .02) { // the clouds overhead mirrored in the sea
+      vec2 cp = vW.xz + r.xz * (uCloudY - vW.y) / r.y; float cr = cloudAt(cp) * smoothstep(.02, .2, r.y);
+      refl = mix(refl, vec3(.86, .88, .9) * (skyCol(vec3(0., 1., 0.)) * .5 + .6), cr * .8);
+    }
     // real bathymetry (heightmap G channel, sqrt-encoded): turquoise over shelves, ink-blue over the deep
     vec4 dm = texture2D(uDepth, clamp(m, 0., 1.)); float depth = mix(3000., dm.g * dm.g * 3000., edge); // fades to open ocean towards the map edge: no straight line through the shallows
     vec3 body = mix(uShallow, uDeep, smoothstep(2., 45., depth));   // only the shelf: 8-bit depth would band over the open ocean
@@ -238,8 +250,10 @@ const cloudFrag = /* glsl */`
   precision highp float;
   ${ATMOS}
   varying vec3 vW;
+  uniform float uLayer;
   void main(){
-    float c = cloudAt(vW.xz); if (c < .01) discard;
+    // stacked layers: each higher slice keeps only the denser cores, so clouds get domed tops and real thickness
+    float c0 = cloudAt(vW.xz); float c = smoothstep(uLayer * .42, 1., c0); if (c < .01) discard;
     // light: thinner towards the sun = brighter rim; thick cores and undersides go blue-grey
     float toward = cloudAt(vW.xz + uSun.xz * .07);
     float light = exp(-toward * 1.6);
@@ -248,9 +262,81 @@ const cloudFrag = /* glsl */`
     vec3 sc = uSunCol / max(uSunCol.r, 1e-3) * min(uSunCol.r * 1.15, 1.25);   // the sun's hue at a capped strength: peach at sunset, not clipped white
     vec3 col = mix(vec3(.55, .6, .66) * amb, sc + vec3(.1) * amb, below ? light * .55 : light);
     col = mix(col, skyCol(vec3(0., 1., 0.)), .12);
-    float a = c * .9 * smoothstep(.03, .3, abs(cameraPosition.y - uCloudY));
+    col *= .86 + uLayer * .3;                                                 // tops catch more light than the base
+    float a = c * (uLayer > 0. ? .55 : .9) * smoothstep(.03, .3, abs(cameraPosition.y - uCloudY - uLayer * .1));
     col = aerial(col, vW);
     gl_FragColor = vec4(col, a);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }`;
+// Volumetric clouds: a ray march through the cloud slab, at half resolution into its own buffer, then laid over the
+// frame. Coverage comes from the same weather field that already shades the island (cloudAt), so the clouds you fly
+// through cast the shadows you see on the ground. Density is shaped by height (flat bases, domed tops) and eroded by a
+// second noise; light is a short march towards the sun (Beer's law with a powder term) plus the sky's ambient.
+const vcloudFrag = /* glsl */`
+  precision highp float;
+  ${ATMOS}
+  uniform mat4 uInvProj, uCamWorld; uniform float uBase, uTop, uFrame;
+  varying vec2 vUv;
+  float prof(float y){ float h = clamp((y - uBase) / (uTop - uBase), 0., 1.); return smoothstep(0., .12, h) * smoothstep(1., .35, h); }
+  float density(vec3 p){
+    float cov = cloudAt(p.xz); if (cov < .02) return 0.;
+    float h = (p.y - uBase) / (uTop - uBase);
+    float d = cov * prof(p.y) * (1.25 - h * .5);
+    float e = noise(p.xz * 26. + vec2(p.y * 31., uTime * .05)) * .55 + noise(p.xz * 61. - p.y * 20.) * .25;
+    return clamp((d - e * .42) * 3.2, 0., 1.);
+  }
+  void main(){
+    vec4 v = uInvProj * vec4(vUv * 2. - 1., 1., 1.); vec3 rd = normalize((uCamWorld * vec4(v.xyz / v.w, 0.)).xyz), ro = cameraPosition;
+    if (abs(rd.y) < 1e-4) rd.y = 1e-4;
+    float ta = (uBase - ro.y) / rd.y, tb = (uTop - ro.y) / rd.y; float t0 = max(0., min(ta, tb)), t1 = max(ta, tb);
+    if (t1 <= 0.) { gl_FragColor = vec4(0.); return; }
+    t1 = min(t1, t0 + 6.);                                               // the slab is thin; long grazing rays stop here
+    const int N = 28; float dt = (t1 - t0) / float(N);
+    float t = t0 + dt * hash(gl_FragCoord.xy + uFrame * 7.13);            // jitter hides the step pattern
+    vec3 acc = vec3(0.); float T = 1.;
+    float amb = clamp(dot(uZenith, vec3(.3, .6, .1)) / .167, .22, 1.);
+    vec3 sc = uSunCol / max(uSunCol.r, 1e-3) * min(uSunCol.r * 1.15, 1.25);
+    for (int i = 0; i < N; i++) {
+      vec3 p = ro + rd * t; float d = density(p);
+      if (d > .01) {
+        float od = 0.; for (int j = 1; j <= 3; j++) od += density(p + uSun * (.03 * float(j)));
+        float light = exp(-od * 1.6) * (1. - exp(-d * 2.)) * 2.2 + .12;        // Beer and powder
+        vec3 c = sc * light + vec3(.55, .6, .66) * amb * (.35 + .4 * (p.y - uBase) / (uTop - uBase));
+        float a = 1. - exp(-d * dt * 34.);
+        acc += T * a * c; T *= 1. - a;
+        if (T < .02) break;
+      }
+      t += dt;
+    }
+    float alpha = 1. - T;
+    vec3 col = alpha > 0. ? acc / alpha : vec3(0.);
+    vec3 wp = ro + rd * (t0 + (t1 - t0) * .3); col = aerial(col, wp);    // distant clouds sink into the haze
+    alpha *= 1. - smoothstep(9., 14., length((ro + rd * t0).xz - ro.xz)); // only the far horizon fades, not clouds seen from high above
+    gl_FragColor = vec4(col * alpha, alpha);
+  }`;
+// Trees on the close-up terrain: one low-poly canopy, instanced thousands of times where the satellite image shows
+// forest. Each sits on the ground (the relief scale applied in the shader, like the land), takes its colour from the
+// photo under it, is lit by the same sun and shaded by the same moving clouds, and sinks into the same haze.
+const treeVert = /* glsl */`
+  ${VEX}
+  uniform float uGrow; attribute vec3 tcol; varying vec3 vN, vW, vC; varying float vLow;
+  void main(){
+    vec4 base = instanceMatrix[3]; vec3 local = (instanceMatrix * vec4(position, 1.)).xyz - base.xyz;
+    vec3 w = vec3(base.x, vex(base.y), base.z) + local * uGrow;
+    vN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal); vW = (modelMatrix * vec4(w, 1.)).xyz; vC = tcol; vLow = position.y;
+    gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.); }`;
+const treeFrag = /* glsl */`
+  precision highp float;
+  ${ATMOS}
+  varying vec3 vN, vW, vC; varying float vLow;
+  void main(){
+    vec3 n = normalize(vN); float diff = max(dot(n, uSun), 0.);
+    float sh = 1. - .6 * cloudAt(vW.xz + sunShift(uCloudY - vW.y));
+    vec3 skyAmb = mix(uGround, uZenith * 1.2 + uHorizon * .3, n.y * .5 + .5);
+    float ao = mix(.55, 1., smoothstep(-.6, .7, vLow));                       // the underside of a crown is darker
+    vec3 col = vC * (uSunCol * diff * sh * 1.35 + skyAmb * .8 * ao);
+    gl_FragColor = vec4(aerial(col, vW), 1.);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }`;
@@ -274,13 +360,33 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
 
   // ---------- renderer ----------
   const canvas = document.createElement('canvas'); canvas.className = 'world-canvas';
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowPower, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: lowPower, powerPreference: 'high-performance', stencil: false });
   let dpr = Math.min(devicePixelRatio || 1, lowPower ? 1.25 : 1.75); renderer.setPixelRatio(dpr);
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.5;
   container.prepend(canvas);
   const scene = new THREE.Scene();
   scene.fog = null;
   const camera = new THREE.PerspectiveCamera(36, 1, 0.04, 400);
+
+  // ---------- the look: a modern frame pipeline on capable machines ----------
+  // Ambient occlusion (N8AO, screen-space, half resolution) gives valleys, ridges and cliffs their depth; a gentle bloom
+  // lets the sun on water and clouds glow; AgX is the filmic colour response current games use; SMAA cleans the edges.
+  // Phones and weak GPUs keep the plain renderer (with its own MSAA and ACES), and a machine that drops frames sheds
+  // the costly passes one by one (see the frame loop).
+  let composer = null, aoPass = null, bloomFx = null;
+  if (!lowPower) {
+    try {
+      composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
+      composer.addPass(new RenderPass(scene, camera));
+      aoPass = new N8AOPostPass(scene, camera, 1, 1);
+      Object.assign(aoPass.configuration, { screenSpaceRadius: true, aoRadius: 42, distanceFalloff: 0.3, intensity: 2.4, halfRes: true, gammaCorrection: false });
+      aoPass.setQualityMode('Medium');
+      composer.addPass(aoPass);
+      bloomFx = new BloomEffect({ intensity: 0.45, luminanceThreshold: 0.82, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.7 });
+      composer.addPass(new EffectPass(camera, bloomFx, new ToneMappingEffect({ mode: ToneMappingMode.AGX })));
+      composer.addPass(new EffectPass(camera, new SMAAEffect()));
+    } catch { composer = null; aoPass = null; bloomFx = null; }
+  }
 
   // the shared atmosphere every shader reads (see ATMOS)
   const atmU = {
@@ -343,8 +449,31 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   sea.rotation.x = -Math.PI / 2; sea.position.y = 0.001; scene.add(sea);
 
   // ---------- clouds: one layer of drifting cumulus, thicker over whichever coast has its monsoon ----------
-  const clouds = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), new THREE.ShaderMaterial({ vertexShader: cloudVert, fragmentShader: cloudFrag, uniforms: atmU, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
-  clouds.rotation.x = -Math.PI / 2; clouds.position.y = atmU.uCloudY.value; clouds.renderOrder = 2; clouds.frustumCulled = false; scene.add(clouds);
+  const cloudGeo = new THREE.PlaneGeometry(90, 90);
+  const cloudLayers = (lowPower ? [0] : [0, 0.5, 1]).map((k) => {
+    const m = new THREE.Mesh(cloudGeo, new THREE.ShaderMaterial({ vertexShader: cloudVert, fragmentShader: cloudFrag, uniforms: { ...atmU, uLayer: { value: k } }, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2; m.position.y = atmU.uCloudY.value + k * 0.1; m.renderOrder = 2 + k; m.frustumCulled = false; scene.add(m); return m;
+  });
+  const clouds = cloudLayers[0];
+  let vcloud = null;
+  if (composer) {
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      uniforms: { ...atmU, uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uBase: { value: atmU.uCloudY.value - 0.04 }, uTop: { value: atmU.uCloudY.value + 0.3 }, uFrame: { value: 0 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }', fragmentShader: vcloudFrag, depthTest: false, depthWrite: false,
+    }));
+    const qScene = new THREE.Scene(); quad.frustumCulled = false; qScene.add(quad);
+    const over = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+      uniforms: { uTex: { value: rt.texture } }, transparent: true, depthTest: false, depthWrite: false, blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+      fragmentShader: 'uniform sampler2D uTex; varying vec2 vUv; void main(){ gl_FragColor = texture2D(uTex, vUv); }',
+    }));
+    over.frustumCulled = false; over.renderOrder = 2; scene.add(over);
+    vcloud = { rt, quad, qScene, over, cam: new THREE.Camera(), on: true };
+    cloudLayers.forEach((m) => { m.visible = false; });
+  }
+  function setVolumetric(on) { if (!vcloud) return; vcloud.on = on; vcloud.over.visible = on; cloudLayers.forEach((m) => { m.visible = !on; }); }
   const weightTarget = new THREE.Vector3(...WEATHER[month]); let liveW = null;
 
   // ---------- pins ----------
@@ -370,32 +499,47 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
     const k = tileK(t, (u - 0.5) * W, (v - 0.5) * H); return k > 0 ? yb + (yOf(sampleTile(t, u, v)) - yb) * k : yb;
   };
   const ids = Object.keys(places); const pinPos = {};
-  const stickGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.14, 6); stickGeo.translate(0, 0.07, 0);
-  const sticks = new THREE.InstancedMesh(stickGeo, new THREE.MeshBasicMaterial({ color: C.cream, toneMapped: false }), ids.length);
-  const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.022, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), ids.length);
-  const m4 = new THREE.Matrix4();
+  // markers: crisp screen-sized dots (a coloured core in a white ring with a soft dark rim), the way modern maps
+  // draw places, instead of 3D pins. Size is in CSS pixels, so they read the same at every zoom.
   const reseat = () => ids.forEach((id) => { pinPos[id].y = heightAt(places[id].u, places[id].v); });
-  ids.forEach((id, i) => { const p = places[id]; const v = toWorld(p.u, p.v); v.y = heightAt(p.u, p.v); pinPos[id] = v;
-    m4.makeTranslation(v.x, v.y, v.z); sticks.setMatrixAt(i, m4); m4.makeTranslation(v.x, v.y + 0.19, v.z); heads.setMatrixAt(i, m4); });
-  scene.add(sticks, heads);
-  const cOn = new THREE.Color(C.lime), cOff = new THREE.Color(0x8c8c8c), cSel = new THREE.Color(0xffffff);
+  ids.forEach((id) => { const p = places[id]; const v = toWorld(p.u, p.v); v.y = heightAt(p.u, p.v); pinPos[id] = v; });
+  const markPos = new Float32Array(ids.length * 3), markCol = new Float32Array(ids.length * 3), markSize = new Float32Array(ids.length);
+  const markGeo = new THREE.BufferGeometry();
+  markGeo.setAttribute('position', new THREE.BufferAttribute(markPos, 3)); markGeo.setAttribute('mcolor', new THREE.BufferAttribute(markCol, 3)); markGeo.setAttribute('msize', new THREE.BufferAttribute(markSize, 1));
+  const markU = { uPR: { value: 1 } };
+  const marks = new THREE.Points(markGeo, new THREE.ShaderMaterial({
+    uniforms: markU, transparent: true, depthWrite: false, toneMapped: false,
+    vertexShader: 'attribute vec3 mcolor; attribute float msize; uniform float uPR; varying vec3 vC; varying float vS; void main(){ vC = mcolor; vS = msize * uPR; gl_PointSize = vS; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); gl_Position.z -= 0.0004 * gl_Position.w; }',
+    fragmentShader: `varying vec3 vC; varying float vS;
+      void main(){ float r = length(gl_PointCoord * 2. - 1.), px = 2. / vS;
+        float a = 1. - smoothstep(1. - px * 1.5, 1., r); if (a < .01) discard;
+        vec3 c = mix(vec3(1.), vC, 1. - smoothstep(.56 - px, .56 + px, r));          // coloured core, white ring
+        float rim = smoothstep(.78 - px, .78 + px, r); c = mix(c, vec3(0.), rim);       // a dark rim keeps it legible on cloud and sand
+        gl_FragColor = vec4(c, a * mix(1., .45, rim));
+        #include <colorspace_fragment>
+      }`,
+  }));
+  // drawn after the frame pipeline (see the loop), so the filmic grade never washes out the saffron
+  const overlay = new THREE.Scene();
+  marks.frustumCulled = false; marks.renderOrder = 3; overlay.add(marks);
+  const cOn = new THREE.Color(C.lime), cOff = new THREE.Color(0xa8a8a8), cSel = new THREE.Color(C.lime);
   let selected = null, filterSet = null;
   let pinK = 1;
   function paintPins() {
+    markU.uPR.value = renderer.getPixelRatio();
     ids.forEach((id, i) => {
-      const vis = !filterSet || filterSet.has(id);
-      heads.setColorAt(i, id === selected ? cSel : !vis ? cOff : places[id].months.includes(currentMonth) ? cOn : cOff);
-      const s = (id === selected ? 1.5 : vis ? 1 : 0.55) * pinK; const v = pinPos[id];
-      m4.makeScale(s, s, s).setPosition(v.x, v.y + 0.145 * pinK, v.z); heads.setMatrixAt(i, m4);
-      m4.makeScale(pinK, pinK, pinK).setPosition(v.x, v.y, v.z); sticks.setMatrixAt(i, m4);
+      const vis = !filterSet || filterSet.has(id), on = places[id].months.includes(currentMonth), v = pinPos[id];
+      (id === selected ? cSel : vis && on ? cOn : cOff).toArray(markCol, i * 3);
+      markSize[i] = id === selected ? 22 : !vis ? 7 : on ? 15 : 11;
+      markPos[i * 3] = v.x; markPos[i * 3 + 1] = v.y + 0.012 * pinK; markPos[i * 3 + 2] = v.z;
     });
-    heads.instanceColor.needsUpdate = true; heads.instanceMatrix.needsUpdate = true; sticks.instanceMatrix.needsUpdate = true;
+    markGeo.attributes.position.needsUpdate = true; markGeo.attributes.mcolor.needsUpdate = true; markGeo.attributes.msize.needsUpdate = true;
   }
   function rescalePins() { const k = THREE.MathUtils.clamp(camera.position.distanceTo(controls.target) / 9, 0.005, 1.6); if (Math.abs(k - pinK) / pinK > 0.04) { pinK = k; paintPins(); } }
 
   // selection ring: a flat pulsing ring at the chosen pin
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.085, 64), new THREE.MeshBasicMaterial({ color: C.lime, transparent: true, depthWrite: false, toneMapped: false }));
-  ring.rotation.x = -Math.PI / 2; ring.visible = false; scene.add(ring);
+  ring.rotation.x = -Math.PI / 2; ring.visible = false; overlay.add(ring);
 
   // ---------- route ----------
   let route = null;
@@ -437,6 +581,60 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   }
   const cancelFlight = () => { if (flight) { flight.res(false); flight = null; } };
   canvas.addEventListener('pointerdown', cancelFlight); canvas.addEventListener('wheel', cancelFlight, { passive: true });
+
+  // ---------- fly mode: a drone you steer with the keyboard (or drag and hold buttons on a phone) ----------
+  // W/S or ↑/↓ forward and back along where you look, A/D or ←/→ sideways, E/Space up, Q/C down, Shift to go fast,
+  // drag to look. Speed follows your height, so skimming a valley and crossing the island both feel right. The ground
+  // and the island's edge are solid. Flying close over a place discovers it.
+  const fly = { on: false, yaw: 0, pitch: -0.35, vel: new THREE.Vector3(), keys: new Set(), drag: null, found: new Set(), tick: 0, hold: { f: 0, b: 0, u: 0, d: 0 } };
+  const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r', KeyE: 'u', Space: 'u', KeyQ: 'd', KeyC: 'd', ShiftLeft: 'fast', ShiftRight: 'fast' };
+  const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName) || e.target?.isContentEditable;
+  addEventListener('keydown', (e) => { if (!fly.on || typing(e) || e.ctrlKey || e.metaKey) return; const k = KEYMAP[e.code]; if (k) { fly.keys.add(k); e.preventDefault(); } });
+  addEventListener('keyup', (e) => { const k = KEYMAP[e.code]; if (k) fly.keys.delete(k); });
+  addEventListener('blur', () => fly.keys.clear());
+  canvas.addEventListener('pointerdown', (e) => { if (!fly.on) return; fly.drag = { x: e.clientX, y: e.clientY, id: e.pointerId }; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!fly.on || !fly.drag || fly.drag.id !== e.pointerId) return;
+    fly.yaw -= (e.clientX - fly.drag.x) * 0.0042; fly.pitch = THREE.MathUtils.clamp(fly.pitch - (e.clientY - fly.drag.y) * 0.0036, -1.45, 0.6);
+    fly.drag.x = e.clientX; fly.drag.y = e.clientY;
+  });
+  const endDrag = (e) => { if (fly.drag?.id === e.pointerId) fly.drag = null; };
+  canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  const flyDir = new THREE.Vector3(), flyRight = new THREE.Vector3(), flyWant = new THREE.Vector3();
+  function setFly(on) {
+    if (on === fly.on) return; cancelFlight();
+    fly.on = on; controls.enabled = !on; fly.keys.clear(); fly.vel.set(0, 0, 0);
+    if (on) { const d = controls.target.clone().sub(camera.position).normalize(); fly.yaw = Math.atan2(-d.x, -d.z); fly.pitch = THREE.MathUtils.clamp(Math.asin(d.y), -1.45, 0.6); }
+    else { // hand back to the orbit controls, looking at the ground ahead
+      flyDir.set(-Math.sin(fly.yaw) * Math.cos(fly.pitch), Math.sin(fly.pitch), -Math.cos(fly.yaw) * Math.cos(fly.pitch));
+      const { u, v } = toUV(camera.position.x, camera.position.z), alt = camera.position.y - (u >= 0 && u <= 1 && v >= 0 && v <= 1 ? heightAt(u, v) : 0);
+      controls.target.copy(camera.position).addScaledVector(flyDir.setY(Math.min(flyDir.y, -0.35)).normalize(), Math.max(0.08, alt * 2.5)); controls.update();
+    }
+  }
+  function stepFly(dt) {
+    const p = camera.position, { u, v } = toUV(p.x, p.z), ground = u >= 0 && u <= 1 && v >= 0 && v <= 1 ? heightAt(u, v) : 0;
+    const alt = Math.max(0.004, p.y - ground), K = fly.keys, HD = fly.hold;
+    flyDir.set(-Math.sin(fly.yaw) * Math.cos(fly.pitch), Math.sin(fly.pitch), -Math.cos(fly.yaw) * Math.cos(fly.pitch));
+    flyRight.set(Math.cos(fly.yaw), 0, -Math.sin(fly.yaw));
+    const speed = THREE.MathUtils.clamp(alt * 1.4, 0.03, 2.2) * (K.has('fast') ? 3.2 : 1);
+    flyWant.set(0, 0, 0)
+      .addScaledVector(flyDir, (K.has('f') || HD.f ? 1 : 0) - (K.has('b') || HD.b ? 1 : 0))
+      .addScaledVector(flyRight, (K.has('r') ? 1 : 0) - (K.has('l') ? 1 : 0));
+    flyWant.y += (K.has('u') || HD.u ? 1 : 0) - (K.has('d') || HD.d ? 1 : 0);
+    if (flyWant.lengthSq() > 1) flyWant.normalize();
+    fly.vel.lerp(flyWant.multiplyScalar(speed), 1 - Math.exp(-dt * 4)); // a little inertia: it glides
+    p.addScaledVector(fly.vel, dt);
+    p.x = THREE.MathUtils.clamp(p.x, -W * 0.62, W * 0.62); p.z = THREE.MathUtils.clamp(p.z, -H * 0.62, H * 0.62); p.y = Math.min(p.y, 24);
+    const nu = toUV(p.x, p.z), g2 = nu.u >= 0 && nu.u <= 1 && nu.v >= 0 && nu.v <= 1 ? heightAt(nu.u, nu.v) : 0;
+    if (p.y < g2 + 0.004) { p.y = g2 + 0.004; if (fly.vel.y < 0) fly.vel.y = 0; }
+    // the orbit target rides ahead of the camera, so haze, detail streaming and the relief scale see a sensible zoom
+    controls.target.copy(p).addScaledVector(flyDir, Math.max(0.05, (p.y - g2) * 2.5));
+    camera.lookAt(p.x + flyDir.x, p.y + flyDir.y, p.z + flyDir.z);
+    if (++fly.tick % 10 === 0 && p.y - g2 < 0.3) for (const id of ids) {
+      if (fly.found.has(id)) continue; const q = pinPos[id];
+      if (Math.hypot(q.x - p.x, q.z - p.z) < 0.06) { fly.found.add(id); api.onDiscover?.(id); }
+    }
+  }
   const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
   function stepFlight(now) {
     const f = flight, k = Math.min(1, (now - f.t0) / f.dur), e = ease(k);
@@ -462,18 +660,18 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
     return { lat, lon, elev: elevAt(u, v), point: p };
   }
   const tmpV = new THREE.Vector3();
-  function screenOf(id, out = tmpV) { out.copy(pinPos[id]); out.y += 0.17 * pinK; out.project(camera); return out; }
+  function screenOf(id, out = tmpV) { out.copy(pinPos[id]); out.y += 0.012 * pinK; out.project(camera); return out; }
 
   // ---------- loop ----------
-  let vexStill = 0;
+  let vexStill = 0, treesOn = true; const fpsStat = { n: 0, t: 0, fps: 0 };
   const clock = new THREE.Clock(); let running = false, frames = 0, slow = 0, currentMonth = month;
   const listeners = new Set();
-  function resize() { const w = container.clientWidth, h = container.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = w < 760 ? 48 : 36; camera.updateProjectionMatrix(); }
+  function resize() { const w = container.clientWidth, h = container.clientHeight; renderer.setSize(w, h, false); composer?.setSize(w, h, false); vcloud?.rt.setSize(Math.max(1, Math.round(w * dpr / 2)), Math.max(1, Math.round(h * dpr / 2))); camera.aspect = w / h; camera.fov = w < 760 ? 48 : 36; camera.updateProjectionMatrix(); }
   const ro = new ResizeObserver(resize); ro.observe(container); resize();
   function frame(now) {
     if (!running) return; requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.1), t = clock.elapsedTime;
-    if (flight) stepFlight(now); else { controls.update(); clampTarget(); }
+    if (fly.on) stepFly(dt); else if (flight) stepFlight(now); else { controls.update(); clampTarget(); }
     { // relief scale: heights read at 3.5× over the whole island, easing to ~1.7× at the closest zoom, where the aerial
       // photos would otherwise smear down cliffs that aren't there. Shadows re-bake for the new scale once it settles.
       const cd = camera.position.distanceTo(controls.target), u = landU.uVex;
@@ -496,16 +694,31 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
       const cd = camera.position.distanceTo(controls.target), ch = Math.max(0.05, camera.position.y);
       const nz = THREE.MathUtils.clamp(cd * 0.04, 0.002, 0.04); // near plane follows you down for close-ups
       if (Math.abs(nz - camera.near) > camera.near * 0.15) { camera.near = nz; camera.updateProjectionMatrix(); }
-      atmU.uHaze.value.set(cd * 1.1, 0.3 / (ch + 1.1));
+      atmU.uHaze.value.set(cd * 1.25, 0.21 / (ch + 1.1));
       atmU.uClear.value.set(controls.target.x, controls.target.z, camera.position.y > atmU.uCloudY.value ? cd * 0.45 * (1 - THREE.MathUtils.smoothstep(cd, 5, 8)) : 0);
-      sky.position.copy(camera.position); clouds.position.x = camera.position.x; clouds.position.z = camera.position.z;
+      sky.position.copy(camera.position); cloudLayers.forEach((m) => { m.position.x = camera.position.x; m.position.z = camera.position.z; });
     }
     if (selected) { const v = pinPos[selected], k = (t * 0.8) % 1; ring.visible = true; ring.position.set(v.x, v.y + 0.01, v.z); ring.scale.setScalar(pinK * (1 + k * 1.6)); ring.material.opacity = 1 - k; } else ring.visible = false;
     rescalePins();
-    renderer.render(scene, camera);
+    if (vcloud?.on) {
+      camera.updateMatrixWorld(); const u = vcloud.quad.material.uniforms; u.uInvProj.value.copy(camera.projectionMatrixInverse); u.uCamWorld.value.copy(camera.matrixWorld); u.uFrame.value = (u.uFrame.value + 1) % 64;
+      renderer.setRenderTarget(vcloud.rt); renderer.render(vcloud.qScene, camera); renderer.setRenderTarget(null);
+    }
+    if (composer) composer.render(dt); else renderer.render(scene, camera);
+    renderer.autoClear = false; renderer.render(overlay, camera); renderer.autoClear = true;
     listeners.forEach((f) => f(dt));
     frames++; if (dt > 0.028) slow++;
-    if (frames === 120) { if (slow > 60 && dpr > 1) { dpr = Math.max(1, dpr - 0.25); renderer.setPixelRatio(dpr); resize(); } frames = 0; slow = 0; }
+    fpsStat.n++; fpsStat.t += dt; if (fpsStat.t >= 0.5) { fpsStat.fps = Math.round(fpsStat.n / fpsStat.t); fpsStat.n = 0; fpsStat.t = 0; }
+    if (frames === 120) {
+      if (slow > 60) { // too slow: first the costly passes go, then resolution
+        if (vcloud?.on) setVolumetric(false);
+        else if (treesOn) { treesOn = false; if (det.cur?.trees) det.cur.trees.visible = false; }
+        else if (aoPass?.enabled) aoPass.enabled = false;
+        else if (bloomFx && bloomFx.intensity > 0) bloomFx.intensity = 0;
+        else if (dpr > 1) { dpr = Math.max(1, dpr - 0.25); renderer.setPixelRatio(dpr); resize(); paintPins(); }
+      }
+      frames = 0; slow = 0;
+    }
   }
   const start = () => { if (running || document.hidden) return; running = true; clock.getDelta(); requestAnimationFrame(frame); };
   const stop = () => { running = false; };
@@ -518,7 +731,7 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   function onFrame(f) { listeners.add(f); return () => listeners.delete(f); }
 
   // ---------- streaming: keep the sharp tiles around wherever the camera looks ----------
-  const MAX_TILES = lowPower ? 9 : 25, SEG = lowPower ? 96 : 160, SKIRT = 0.03;
+  const MAX_TILES = lowPower ? 9 : 25, SEG = lowPower ? 96 : 160, SKIRT = 0.004; // deep enough to hide hairline cracks, shallow enough not to show through clear water
   let avail = null; const failed = new Set(), waiters = new Map(); let inflight = 0;
   const indexReady = fetch(`${import.meta.env.BASE_URL}tiles/index.json`).then((r) => r.json()).then((j) => { avail = new Set(j.tiles); }).catch(() => { avail = new Set(); });
   const setMask = (t, on) => { maskData[((t.y - MY) * MW + (t.x - MX)) * 4] = on ? 255 : 0; maskTex.needsUpdate = true; };
@@ -719,7 +932,7 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   // pinned to the coarse surface and it grows out of whatever was shown before, so nothing pops. Fallbacks: offline,
   // Save-Data/2G, slow or failing downloads → the patch is built from the 38 m heights already here (still 3× sharper);
   // downloads that arrive late upgrade it in place. Built in short slices between frames, never mid-flight.
-  const DG = lowPower ? 160 : 256, DN = DG + 1, DZ = 13, DSKIRT = 0.01, DPX = 1024, P13 = 2 ** (DZ - TZ) * 256;
+  const DG = lowPower ? 160 : 256, DN = DG + 1, DZ = 13, DSKIRT = 0.004, DPX = 1024, P13 = 2 ** (DZ - TZ) * 256;
   const DEM_URL = (x, y) => `https://elevation-tiles-prod.s3.amazonaws.com/terrarium/${DZ}/${x}/${y}.png`;
   const demCache = new Map(); // "x_y" → Float32Array(256²) | null (no data there); most recent last
   const demCan = new OffscreenCanvas(256, 256), demCtx = demCan.getContext('2d', { willReadFrequently: true });
@@ -886,6 +1099,7 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
       uRect: { value: new THREE.Vector4(x0 / W + 0.5, 1 - ((z0 + S) / H + 0.5), (x0 + S) / W + 0.5, 1 - (z0 / H + 0.5)) } };
     p.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: detVert, fragmentShader: landFrag, uniforms: uni, side: THREE.DoubleSide }));
     p.hy = hy; p.rim = rim;
+    if (!lowPower && treesOn) p.trees = buildTrees(p, can, x0, z0, S);
     if (id !== det.job) { disposePatch(p); return null; }
     // swap: the new patch starts exactly where the old surface was, then grows into the real shape
     const old = det.cur; det.cur = p; scene.add(p.mesh); if (old) disposePatch(old);
@@ -894,13 +1108,44 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
     if (bakedFor !== p.bakedFor) runBake(); // the hour moved while it was being built
     return p;
   }
-  function disposePatch(p) { scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.uniforms.uSat.value.dispose(); p.mesh.material.dispose(); }
+  // ---------- trees ----------
+  const treeGeo = (() => { const g = new THREE.IcosahedronGeometry(1, 1); const a = g.attributes.position;
+    for (let i = 0; i < a.count; i++) { const y = a.getY(i); a.setY(i, y < 0 ? y * 0.35 : y * 0.9); a.setX(i, a.getX(i) * (1 + Math.sin(i * 12.9) * 0.08)); a.setZ(i, a.getZ(i) * (1 + Math.cos(i * 7.3) * 0.08)); }
+    g.computeVertexNormals(); return g; })();
+  function buildTrees(p, can, x0, z0, S) {
+    const px = can.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, DPX, DPX).data;
+    const N = 190, cell = S / N, M = [], col = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    let seed = Math.floor((x0 + 50) * 9973 + (z0 + 50) * 7919); const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const R = 12 / 29000 * 1.5; // a crown about 12 m across, drawn a little larger so it reads from the air
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      for (let k = 0; k < 2; k++) {
+        const x = x0 + (i + rnd()) * cell, z = z0 + (j + rnd()) * cell;
+        const cx = Math.min(DPX - 1, Math.floor(((x - x0) / S) * DPX)), cz = Math.min(DPX - 1, Math.floor(((z - z0) / S) * DPX)), o = (cz * DPX + cx) * 4;
+        const r = px[o], g = px[o + 1], b = px[o + 2], lum = (r + g + b) / 765, green = g - Math.max(r, b);
+        let pr = THREE.MathUtils.clamp((green - 3) / 22, 0, 1) * (lum < 0.3 ? 1 : lum < 0.42 ? 0.35 : 0.05); // dark green: forest; bright green: paddy
+        if (pr <= 0 || rnd() > pr * 0.9) continue;
+        const e = patchAt({ ...p, m: 1 }, x, z, true); if (!(e > 3)) continue;
+        const y = patchAt({ ...p, m: 1 }, x, z); const s = R * (0.7 + rnd() * 0.7);
+        q.setFromAxisAngle(up, rnd() * 6.283); sc.set(s * (0.9 + rnd() * 0.3), s * (0.8 + rnd() * 0.7), s * (0.9 + rnd() * 0.3));
+        m4.compose(new THREE.Vector3(x, y, z), q, sc); M.push(m4.clone());
+        const t = 0.85 + rnd() * 0.3; col.push(r / 255 * t * 0.9, g / 255 * t, b / 255 * t * 0.8);
+      }
+    }
+    if (!M.length) return null;
+    const geo = treeGeo.clone();
+    const inst = new THREE.InstancedMesh(geo, new THREE.ShaderMaterial({ vertexShader: treeVert, fragmentShader: treeFrag, uniforms: { ...landU, uGrow: { value: 0 } } }), M.length);
+    M.forEach((m, i) => inst.setMatrixAt(i, m));
+    const lin = new Float32Array(col.length); for (let i = 0; i < col.length; i++) { const c = col[i]; lin[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; } // photo sRGB → linear light
+    geo.setAttribute('tcol', new THREE.InstancedBufferAttribute(lin, 3));
+    inst.frustumCulled = false; scene.add(inst); det.trees = M.length; return inst;
+  }
+  function disposePatch(p) { if (p.trees) { scene.remove(p.trees); p.trees.geometry.dispose(); p.trees.material.dispose(); } scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.uniforms.uSat.value.dispose(); p.mesh.material.dispose(); }
 
   onFrame((dt) => {
     const p = det.cur;
     if (p) { // grow in (or melt back out when leaving)
       const t = det.leaving ? Math.max(0, p.t - dt * 1.8) : Math.min(1, p.t + dt * 1.4);
-      if (t !== p.t) { p.t = t; p.m = THREE.MathUtils.smoothstep(t, 0, 1); p.mesh.material.uniforms.uMorph.value = p.m; reseat(); paintPins(); }
+      if (t !== p.t) { p.t = t; p.m = THREE.MathUtils.smoothstep(t, 0, 1); p.mesh.material.uniforms.uMorph.value = p.m; if (p.trees) p.trees.material.uniforms.uGrow.value = p.m; reseat(); paintPins(); }
       if (det.leaving && t === 0) { disposePatch(p); det.cur = null; landU.uDetOn.value = 0; det.leaving = false; reseat(); paintPins(); }
     }
     const d = camera.position.distanceTo(controls.target), c = controls.target;
@@ -958,10 +1203,12 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   }
 
   const api = {
-    camera, controls, canvas, pinPos, hasSatellite: !!satBitmap, debug: { land, sea, scene, bakeStats, hi, hiZoom, det },
+    camera, controls, canvas, pinPos, hasSatellite: !!satBitmap, debug: { land, sea, scene, bakeStats, hi, hiZoom, det, composer, aoPass, bloomFx, setVolumetric, get vcloud() { return vcloud; } },
     flyTo, cancelFlight, groundAt, screenOf, onFrame, setRoute,
     worldOf: (u, v) => { const p = toWorld(u, v); p.y = heightAt(u, v); return p; },
     get flying() { return !!flight; },
+    setFly, get flyMode() { return fly.on; }, fly, // fly.found: discovered ids; fly.hold: on-screen buttons
+    heading() { return { yaw: fly.yaw, x: camera.position.x, z: camera.position.z }; },
     setMonth(m) { currentMonth = m; weightTarget.set(...(liveW || WEATHER[m])); paintPins(); setHour(currentHour); }, // the sun's path changes with the season
     setLiveWeather(w) { liveW = w; weightTarget.set(...(w || WEATHER[currentMonth])); }, // today's cloud cover, or null for the month's climate
     setHour, get hour() { return currentHour; }, sunAt: (h) => sunAt(currentMonth, h),
@@ -978,7 +1225,10 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
     },
     clearDetail() {},
     home(duration = 2.2) { return flyTo({ target: new THREE.Vector3(0.3, 0, 0.5), distance: 19, polar: 0.72, azimuth: 0.18, duration }); },
-    intro() { camera.position.set(0, 70, 8); controls.target.set(0, 0, 0); camera.lookAt(0, 0, 0); return api.home(3.4); },
+    // the first visit: from high above the Indian Ocean, a slow turning dive down through the monsoon clouds
+    intro() { camera.position.set(-6, 64, 30); controls.target.set(0.3, 0, 0.5); camera.lookAt(0.3, 0, 0.5);
+      return flyTo({ target: new THREE.Vector3(0.3, 0, 0.5), distance: 19, polar: 0.72, azimuth: 0.18, duration: 5.2 }); },
+    quality() { return { fps: fpsStat.fps, clouds: vcloud ? (vcloud.on ? '3D' : 'layers') : 'layers', ao: !!aoPass?.enabled, bloom: !!bloomFx && bloomFx.intensity > 0, dpr, trees: det.cur?.trees ? det.trees : 0, pipeline: !!composer }; },
     pause: stop, resume: start,
     dispose() { stop(); ro.disconnect(); controls.dispose(); renderer.dispose(); canvas.remove(); },
   };

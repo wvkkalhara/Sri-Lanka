@@ -90,7 +90,8 @@ h3 { font-weight: 700; font-stretch: 75%; line-height: 1.05; }
   background: var(--night); overflow: hidden;
 }
 .stage canvas { width: 100%; height: 100%; }
-.stage .relief { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: 38% 50%; background: #000; }
+.stage .relief { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: 38% 50%; background: #000;
+  filter: grayscale(1) contrast(1.9) brightness(.62); } /* the relief in silver on black: the sea falls away, the hills stand out */
 .stage canvas + .relief { display: none; }
 .pins-layer { position: absolute; inset: 0; pointer-events: none; }
 .pin-label {
@@ -126,16 +127,22 @@ h3 { font-weight: 700; font-stretch: 75%; line-height: 1.05; }
   position: relative; z-index: 2; min-height: 125svh; display: grid; grid-template-columns: repeat(12, 1fr);
   column-gap: var(--gap); align-items: center; padding: 18svh var(--m);
 }
-.chapter-card { grid-column: 1 / span 4; background: var(--bg); padding: 28px; }
+.chapter-card { grid-column: 1 / span 5; background: var(--bg); padding: 32px; }
 .chapter-card h2 { font-size: clamp(2.2rem, 1rem + 3.2vw, 4.2rem); margin-bottom: 16px; }
 .chapter-card p { max-width: 36ch; }
-.chapter-places { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: var(--step-small); font-weight: 500; }
-.chapter-places a { display: inline-block; padding: 6px 0; }
-.chapter-photo { grid-column: 10 / span 3; }
+.chapter-places { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; font-size: 15px; font-weight: 500; }
+.chapter-places a { display: block; padding: 9px 0; text-decoration: none; box-shadow: inset 0 -1px 0 var(--surface-2); transition: color .15s, box-shadow .15s; }
+.chapter-places a:hover { color: var(--accent); box-shadow: inset 0 -1px 0 var(--accent); }
+.chapter-photo { grid-column: 9 / span 4; }
 .chapter-photo .pic { aspect-ratio: 4 / 5; }
 .chapter-photo figcaption { background: var(--bg); padding: 8px 12px; font-size: var(--step-small); }
-.chapter:nth-child(even) .chapter-card { grid-column: 9 / span 4; grid-row: 1; }
-.chapter:nth-child(even) .chapter-photo { grid-column: 1 / span 3; grid-row: 1; }
+.chapter:nth-child(even) .chapter-card { grid-column: 8 / span 5; grid-row: 1; }
+.chapter:nth-child(even) .chapter-photo { grid-column: 1 / span 4; grid-row: 1; }
+@media (max-width: 1100px) and (min-width: 761px) {
+  .chapter-card h2 { font-size: clamp(2rem, .6rem + 3vw, 3rem); }
+  .chapter-card, .chapter:nth-child(even) .chapter-card { grid-column: span 7; }
+  .chapter-photo, .chapter:nth-child(even) .chapter-photo { grid-column: span 5; }
+}
 
 .dial {
   position: sticky; bottom: 14px; z-index: 8; margin: 0 auto 14px var(--m); width: max-content; max-width: min(calc(100% - 2 * var(--m)), 58vw);
@@ -361,7 +368,7 @@ h3 { font-weight: 700; font-stretch: 75%; line-height: 1.05; }
 .lite .hidden-stage { position: relative; height: auto; overflow: visible; background: none; }
 .lite .hidden-bg { display: none; }
 .lite .hidden h2 { position: static; color: var(--ink); padding: 0 var(--m) 30px; max-width: none; }
-.lite .hidden-track { position: static; translate: none; transform: none !important; padding: 0 var(--m) 10px; overflow-x: auto; scroll-snap-type: x mandatory; }
+.lite .hidden-track { position: static; translate: none; transform: none !important; margin: 0 var(--m); padding: 0 0 10px; overflow-x: auto; scroll-snap-type: x mandatory; }
 .lite .hcard { scroll-snap-align: start; }
 .lite .triptych { height: auto; }
 .lite .triptych-stage { position: relative; height: auto; overflow: visible; }
@@ -453,3 +460,8 @@ h3 { font-weight: 700; font-stretch: 75%; line-height: 1.05; }
 .lite .stage .relief { display: block; inset: 120px auto auto 38vw; width: 22vw; height: auto; max-height: calc(100svh - 200px); object-fit: contain; background: none; }
 @media (max-width: 760px) { .lite .stage { display: none; } }
 .lite .hero-copy { background: none; }
+
+/* ---------- motion on the plain page (only when script runs and motion is welcome) ---------- */
+.moving .rise { opacity: 0; transform: translateY(28px); transition: opacity .7s var(--ease) var(--d, 0ms), transform .9s var(--ease) var(--d, 0ms); }
+.moving .rise.in { opacity: 1; transform: none; }
+.moving .rise.in, .still .rise { opacity: 1; }

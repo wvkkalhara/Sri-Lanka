@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://ibasemaps-api.arcgis.com https://server.arcgisonline.com https://elevation-tiles-prod.s3.amazonaws.com https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types sw
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://*.fbcdn.net https://*.mapillary.com; font-src 'self'; connect-src 'self' https://ibasemaps-api.arcgis.com https://server.arcgisonline.com https://elevation-tiles-prod.s3.amazonaws.com https://api.open-meteo.com https://graph.mapillary.com https://*.mapillary.com https://*.fbcdn.net; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types sw
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY

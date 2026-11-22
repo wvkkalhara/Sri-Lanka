@@ -31,7 +31,8 @@ const hasGL = (() => { try { const c = document.createElement('canvas'); return 
 const choice = store.get('lite');
 // an automatic fallback (3D failed to start, or the GPU reset) lasts for this visit only; a visitor's own choice is remembered
 const session = { get: () => { try { return sessionStorage.getItem('lite-auto'); } catch { return null; } }, set: () => { try { sessionStorage.setItem('lite-auto', '1'); } catch {} } };
-const wantApp = hasGL && session.get() !== '1' && (choice === '0' || (choice === null && !weak && !reduced));
+const forceLite = new URLSearchParams(location.search).has('lite'); // a shareable link to the plain page
+const wantApp = !forceLite && hasGL && session.get() !== '1' && (choice === '0' || (choice === null && !weak && !reduced));
 const lowPower = matchMedia('(max-width: 760px)').matches || (navigator.hardwareConcurrency || 8) <= 4;
 
 document.addEventListener('click', (e) => {
@@ -51,6 +52,7 @@ if (wantApp) {
 // ---------------------------------------------------------------------------
 function guide() {
   root.classList.add('lite');
+  pageMotion();
   $('#app')?.remove();
   const BY_ID = Object.fromEntries(PLACES.map((p) => [p.id, p]));
   const REGION = Object.fromEntries(REGIONS.map((r) => [r.id, r]));
@@ -134,4 +136,16 @@ function guide() {
   planner = initPlanner($('#plan'), { getMonth: () => month, setMonth, openPlace, toast });
   onMonth((m) => planner.syncMonth(m));
   if (location.hash.startsWith('#place-')) { const id = location.hash.slice(7); if (BY_ID[id]) requestAnimationFrame(() => openPlace(id, false)); }
+}
+
+// ---------------------------------------------------------------------------
+// Motion on the plain page: each block rises in as it arrives (transform and opacity only, once). The plain page keeps
+// its scenes flat and fast on purpose; with reduced motion nothing moves at all.
+// ---------------------------------------------------------------------------
+function pageMotion() {
+  if (reduced) { root.classList.add('still'); return; }
+  root.classList.add('moving');
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -12% 0px' });
+  document.querySelectorAll('.chapter-card, .chapter-photo, .atlas-head, .planner > *, .faq > *, .verbs > *, .triptych > *, .statement-text').forEach((el, i) => { el.classList.add('rise'); el.style.setProperty('--d', `${(i % 3) * 70}ms`); io.observe(el); });
+  setTimeout(() => document.querySelectorAll('.rise:not(.in)').forEach((el) => el.classList.add('in')), 3500); // never leave content hidden
 }

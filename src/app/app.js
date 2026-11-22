@@ -252,7 +252,11 @@ function render() {
 }
 
 // ---------- views ----------
-function panel(...kids) { const b = $('.panel-body'); b.replaceChildren(...kids); }
+function panel(...kids) {
+  const b = $('.panel-body'); b.replaceChildren(...kids); b.scrollTop = 0;
+  if (reduced || !b.animate) return; // each block rises into place, one after another
+  [...b.children].slice(0, 9).forEach((el, i) => el.animate([{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: 40 + i * 45, easing: 'cubic-bezier(.2,.7,.1,1)', fill: 'backwards' }));
+}
 function sheet(pos) { if (phone()) $('.panel').dataset.sheet = pos; }
 
 function renderExplore(keepFocus) {
@@ -338,6 +342,7 @@ function renderPlace(id) {
     h('div', { class: 'row wrap' },
       h('button', { type: 'button', class: 'btn', onclick: () => { toggleTrip(id); renderPlace(id); } }, inTrip ? 'Remove from my trip' : 'Add to my trip'),
       h('button', { type: 'button', class: 'btn ghost', onclick: () => orbit(id) }, 'Orbit in 3D'),
+      MLY_TOKEN ? h('button', { type: 'button', class: 'btn ghost', onclick: () => walkHere(id), title: 'Street-level photos from Mapillary' }, 'Walk here') : null,
       VIEWPOINTS[id] ? h('button', { type: 'button', class: 'btn ghost', onclick: () => photoSpot(id), title: 'Fly to where the photographer stood' }, 'Photo spot') : null,
       h('a', { class: 'link', href: `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=13/${p.lat}/${p.lon}`, target: '_blank', rel: 'noopener noreferrer' }, 'OpenStreetMap')),
     h('h3', { class: 'sub' }, 'Close by'),
@@ -490,6 +495,8 @@ function openPalette() {
     { label: 'Switch to relief map', run: () => setStyle('relief') }, { label: 'Switch to satellite', run: () => setStyle('satellite') },
     { label: 'Reset the view', run: () => world?.home() }, { label: 'What is near me?', run: () => { go('#/explore'); nearMe(); } },
     { label: 'Open the info view (no 3D)', run: () => { store.set('lite', '1'); location.reload(); } },
+    { label: 'Speed meter: frames per second (P)', run: () => toggleFps() },
+    { label: 'Fly: steer a drone and discover places (F)', run: () => setFly(true) },
     ...MONTHS.map((m, i) => ({ label: `Travel in ${m}`, run: () => setMonth(i + 1) })),
     ...[['Sunrise', 6], ['Morning light', 8.5], ['Midday sun', 12], ['Golden hour', 17], ['Sunset', 18], ['Blue hour', 18.75]].map(([l, h]) => ({ label: `${l} (time of day)`, run: () => setHour(h) })),
     { label: 'Live: the sun over Sri Lanka right now', run: () => setLive(true) },
@@ -531,6 +538,86 @@ function nearMe() {
   }, () => toast('Location was not shared. Sorting by the map view instead.'), { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
 }
 
+// ---------- fly mode: the island as a game ----------
+// Steer a drone over the real terrain; flying low over a place discovers it. Progress is kept in this browser only.
+const found = new Set((() => { try { return JSON.parse(store.get('found') || '[]').filter((id) => BY_ID[id]); } catch { return []; } })());
+let flyTimer = 0;
+function setFly(on) {
+  if (!world) return; world.setFly(on);
+  document.getElementById('app').classList.toggle('flying', on); document.querySelector('.fly-hud').hidden = !on;
+  clearInterval(flyTimer);
+  if (on) {
+    world.fly.found = found; flyScore(); flyNext(); flyTimer = setInterval(flyNext, 250);
+    toast(matchMedia('(pointer: coarse)').matches ? 'Drag to look, hold the buttons to fly.' : 'W A S D to fly, drag to look. Esc to land.');
+  }
+}
+function flyScore() { document.querySelector('.fly-n strong').textContent = String(found.size); document.querySelector('.fly-n span').textContent = ` of ${PLACES.length}`; }
+function flyNext() { // the nearest place still to find, with an arrow relative to where you are heading
+  const h = world.heading(); let best = null, bd = Infinity;
+  for (const p of PLACES) { if (found.has(p.id)) continue; const q = world.pinPos[p.id], d = Math.hypot(q.x - h.x, q.z - h.z); if (d < bd) { bd = d; best = { p, q }; } }
+  const txt = document.querySelector('.fly-next-text'), arrow = document.querySelector('.fly-arrow');
+  if (!best) { txt.textContent = `All ${PLACES.length} found. You have seen the whole island.`; arrow.hidden = true; return; }
+  const a = Math.atan2(-(best.q.x - h.x), -(best.q.z - h.z)), rel = Math.atan2(Math.sin(a - h.yaw), Math.cos(a - h.yaw));
+  arrow.hidden = false; arrow.style.rotate = `${(-rel).toFixed(3)}rad`;
+  const km = bd * 28.7; txt.textContent = `${best.p.name} · ${km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(km < 10 ? 1 : 0) + ' km'}`;
+}
+function onDiscover(id) {
+  if (found.has(id)) return; found.add(id); store.set('found', JSON.stringify([...found])); flyScore();
+  toast(`Discovered ${BY_ID[id].name} · ${found.size} of ${PLACES.length}`);
+}
+function flyPad() { // phone buttons: hold to fly
+  document.querySelectorAll('.fly-pad [data-hold]').forEach((b) => {
+    const k = b.dataset.hold, set = (v) => { if (world) world.fly.hold[k] = v; b.classList.toggle('on', !!v); };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); set(1); });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => b.addEventListener(t, () => set(0)));
+  });
+}
+
+// ---------- the speed meter (P): frames per second and what the device is running ----------
+let fpsTimer = 0;
+function toggleFps() {
+  const el = $('.fps'); el.hidden = !el.hidden; clearInterval(fpsTimer);
+  if (el.hidden || !world) return;
+  const tick = () => { const q = world.quality(); el.textContent = `${q.fps} fps · ${q.pipeline ? `clouds ${q.clouds}, AO ${q.ao ? 'on' : 'off'}, glow ${q.bloom ? 'on' : 'off'}` : 'light mode'} · ${q.dpr.toFixed(2)}× · ${q.trees.toLocaleString()} trees`; };
+  tick(); fpsTimer = setInterval(tick, 500);
+}
+
+// ---------- walk here: street-level photos from Mapillary ----------
+// Free, open street photos shared by people (CC BY-SA). The viewer (its own three.js) loads only when someone taps
+// "Walk here", so it costs nothing until then. Needs VITE_MAPILLARY_TOKEN (a free Mapillary client token, see
+// .env.example); without one the button does not exist. Coverage is patchy away from towns, so the nearest photo
+// within about 1 km is used, and the visitor is told plainly when there is none.
+const MLY_TOKEN = import.meta.env.VITE_MAPILLARY_TOKEN || '';
+let walkViewer = null;
+async function nearestStreetPhoto(p) {
+  for (const d of [0.0025, 0.01]) { // about 250 m, then about 1 km
+    const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 8000);
+    try {
+      const u = `https://graph.mapillary.com/images?access_token=${encodeURIComponent(MLY_TOKEN)}&fields=id,geometry&limit=25&bbox=${p.lon - d},${p.lat - d},${p.lon + d},${p.lat + d}`;
+      const r = await fetch(u, { signal: ac.signal, credentials: 'omit', referrerPolicy: 'origin' });
+      if (r.status === 401 || r.status === 403) return 'bad-token'; if (!r.ok) return null;
+      const list = ((await r.json()).data || []).filter((x) => typeof x.id === 'string' && /^\d+$/.test(x.id) && Array.isArray(x.geometry?.coordinates));
+      if (list.length) return list.map((x) => ({ id: x.id, d: (x.geometry.coordinates[0] - p.lon) ** 2 + (x.geometry.coordinates[1] - p.lat) ** 2 })).sort((a, b) => a.d - b.d)[0].id;
+    } catch { return null; } finally { clearTimeout(timer); }
+  }
+  return null;
+}
+async function walkHere(id) {
+  const p = BY_ID[id]; if (!p || !MLY_TOKEN) return;
+  if (navigator.connection?.saveData) return toast('Street photos are large; they stay off while Save-Data is on.');
+  toast(`Looking for street photos near ${p.name}…`);
+  const imageId = await nearestStreetPhoto(p);
+  if (imageId === 'bad-token') return toast('Street photos are not set up correctly on this site yet (the Mapillary key was refused).');
+  if (!imageId) return toast(`No street photos near ${p.name} yet. Mapillary covers towns and main roads best.`);
+  let mod; try { [mod] = await Promise.all([import('mapillary-js'), import('mapillary-js/dist/mapillary.css')]); } catch { return toast('The street viewer could not load. Check your connection and try again.'); }
+  const dlg = document.querySelector('.walk'); const box = dlg.querySelector('.walk-view'); box.replaceChildren();
+  dlg.querySelector('.walk-title').textContent = `Near ${p.name}`;
+  world?.pause(); dlg.showModal();
+  try { walkViewer = new mod.Viewer({ accessToken: MLY_TOKEN, container: box, imageId, component: { cover: false } }); }
+  catch { dlg.close(); toast('The street viewer could not start on this device.'); }
+}
+function closeWalk() { try { walkViewer?.remove(); } catch {} walkViewer = null; world?.resume(); }
+
 function setStyle(s) { state.style = s; store.set('style', s); world?.setStyle(s); $('[data-cmd=style]').textContent = s === 'relief' ? 'Satellite' : 'Relief map'; }
 
 // ---------- labels over the 3D pins ----------
@@ -568,9 +655,9 @@ function labels() {
     const placed = uiRects.slice(); const ui = placed.length;
     for (const c of cands) {
       const el = els[c.p.id]; const lw = (widths[c.p.id] ||= el.offsetWidth || 120);
-      const r = { l: c.x - lw / 2, r: c.x + lw / 2, t: c.y - 34, b: c.y - 6 };
+      const r = { l: c.x - lw / 2, r: c.x + lw / 2, t: c.y - 44, b: c.y - 14 };
       if (r.t < 4 || r.l < 4 || r.r > w - 4 || placed.length - ui > 18 || placed.some((q) => r.l < q.r + 4 && r.r > q.l - 4 && r.t < q.b + 2 && r.b > q.t - 2)) { el.classList.remove('on'); continue; }
-      placed.push(r); el.style.transform = `translate(${c.x.toFixed(1)}px, ${(c.y - 8).toFixed(1)}px) translate(-50%, -100%)`;
+      placed.push(r); el.style.transform = `translate(${c.x.toFixed(1)}px, ${(c.y - 16).toFixed(1)}px) translate(-50%, -100%)`;
       el.classList.add('on'); el.classList.toggle('sel', c.p.id === sel); el.classList.toggle('off', !c.p.months.includes(state.month));
     }
   });
@@ -622,10 +709,19 @@ export async function boot({ lowPower, onFail }) {
     else if (cmd === 'info-view') { store.set('lite', '1'); location.reload(); }
     else if (cmd === 'skip-intro') finishIntro(true);
     else if (cmd === 'live') setLive(!state.live);
+    else if (cmd === 'fly') setFly(!world?.flyMode);
   });
   addEventListener('keydown', (e) => {
     if (e.target.closest?.('input, select, textarea') && e.key !== 'Escape') return;
+    if (world?.flyMode) { // in the air only these keys mean anything; the rest steer the drone
+      if (e.key === 'Escape' || e.key === 'f' || e.key === 'F') setFly(false);
+      else if (e.key === '[' || e.key === ']') setHour(state.hour + (e.key === ']' ? 0.5 : -0.5));
+      else if (e.key === 'l' || e.key === 'L') setLive(!state.live);
+      return;
+    }
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && world) { setFly(true); return; }
     if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || e.key === '/') { e.preventDefault(); openPalette(); }
+    else if (e.key === 'p' || e.key === 'P') toggleFps();
     else if (e.key === 'Escape' && !$('.palette').open && route.name !== 'explore') go('#/explore');
     else if (route.name === 'place' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const l = visiblePlaces(); const i = l.findIndex((x) => x.id === route.id); go(`#/place/${l[(i + (e.key === 'ArrowRight' ? 1 : -1) + l.length) % l.length].id}`); }
     else if (e.key === 'r' || e.key === 'R') world?.home();
@@ -635,7 +731,9 @@ export async function boot({ lowPower, onFail }) {
     else if (e.key === 'l' || e.key === 'L') setLive(!state.live);
   });
   addEventListener('hashchange', render);
-  saveTrip(); bottomSheet();
+  saveTrip(); bottomSheet(); flyPad();
+  document.querySelector('.walk-close').addEventListener('click', () => document.querySelector('.walk').close());
+  document.querySelector('.walk').addEventListener('close', closeWalk);
   render(); // panels work immediately, before the 3D is ready
 
   const n = $('.loader-n'), bar = $('.loader-bar');
@@ -643,7 +741,8 @@ export async function boot({ lowPower, onFail }) {
   function finishIntro(skip) {
     if (introDone) return; introDone = true; $('.loader').classList.add('done');
     if (!world) return;
-    if (skip || reduced || store.get('seenIntro')) world.home(skip ? 0.01 : 1.2); else world.intro();
+    if (skip || reduced || store.get('seenIntro')) world.home(skip ? 0.01 : 1.2);
+    else { const t = $('.intro-title'); t.hidden = false; t.addEventListener('animationend', () => { t.hidden = true; }, { once: true }); world.intro(); }
     store.set('seenIntro', '1');
   }
   try {
@@ -652,6 +751,7 @@ export async function boot({ lowPower, onFail }) {
     world = await createWorld({ container: $('.globe'), places: pins, month: state.month, hour: state.hour, lowPower,
       onProgress: (f) => { const v = Math.round(f * 100); n.textContent = String(v); bar.style.scale = `${f} 1`; } });
     if (import.meta.env.DEV) window.__world = world;
+    world.onDiscover = onDiscover;
     world.onCredit = (t) => { const c = $('.map-credit'); c.textContent = t || ''; c.hidden = !t; };
     world.onLost =() => { toast('3D stopped on this device. Opening the info view.'); try { sessionStorage.setItem('lite-auto', '1'); } catch {} setTimeout(() => location.reload(), 1200); };
     if (!world.hasSatellite) state.style = 'relief';
