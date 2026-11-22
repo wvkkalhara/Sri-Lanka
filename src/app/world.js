@@ -8,7 +8,7 @@ export const W = 10, H = W * ASPECT;
 const VSCALE = 0.3 / 2500;
 const C = {
   zenith: 0x3d79a8, horizon: 0xd3dfd8, ground: 0x6f8c84, sunCol: 0xfff0d8, deep: 0x0b3a52, shallow: 0x2a8f94,
-  lime: 0xb9f28a, cream: 0xeef1e2, reliefLow: 0x2e5a3c, reliefHigh: 0xd9e4b8, contour: 0x0b2418,
+  lime: 0xf2a33a, cream: 0xf2f2f2, reliefLow: 0x2e5a3c, reliefHigh: 0xd9e4b8, contour: 0x0b2418,
 };
 export const toWorld = (u, v) => new THREE.Vector3((u - 0.5) * W, 0, (v - 0.5) * H);
 export const toUV = (x, z) => ({ u: x / W + 0.5, v: z / H + 0.5 });
@@ -378,7 +378,7 @@ export async function createWorld({ container, places, month = 1, hour = 15.5, l
   ids.forEach((id, i) => { const p = places[id]; const v = toWorld(p.u, p.v); v.y = heightAt(p.u, p.v); pinPos[id] = v;
     m4.makeTranslation(v.x, v.y, v.z); sticks.setMatrixAt(i, m4); m4.makeTranslation(v.x, v.y + 0.19, v.z); heads.setMatrixAt(i, m4); });
   scene.add(sticks, heads);
-  const cOn = new THREE.Color(C.lime), cOff = new THREE.Color(0x6f857a), cSel = new THREE.Color(0xffffff);
+  const cOn = new THREE.Color(C.lime), cOff = new THREE.Color(0x8c8c8c), cSel = new THREE.Color(0xffffff);
   let selected = null, filterSet = null;
   let pinK = 1;
   function paintPins() {

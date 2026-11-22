@@ -635,7 +635,7 @@ export async function boot({ lowPower, onFail }) {
     else if (e.key === 'l' || e.key === 'L') setLive(!state.live);
   });
   addEventListener('hashchange', render);
-  saveTrip(); bottomSheet(); cursor();
+  saveTrip(); bottomSheet();
   render(); // panels work immediately, before the 3D is ready
 
   const n = $('.loader-n'), bar = $('.loader-bar');
