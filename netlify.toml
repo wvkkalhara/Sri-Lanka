@@ -1,0 +1,8 @@
+# Netlify: security headers come from public/_headers (copied into dist/). Cloudflare Pages reads the same file.
+# Add VITE_ARCGIS_KEY in the site's environment variables for the close-up aerial imagery.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"

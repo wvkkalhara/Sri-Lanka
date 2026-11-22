@@ -1,0 +1,14 @@
+{
+  "bounds": {
+    "west": 79.45,
+    "east": 82.05,
+    "south": 5.75,
+    "north": 9.98
+  },
+  "zoom": 9,
+  "width": 946,
+  "height": 1555,
+  "maxElevation": 2508,
+  "minElevation": -4310,
+  "source": "AWS Terrain Tiles (Mapzen/Tilezen terrarium), open data"
+}
